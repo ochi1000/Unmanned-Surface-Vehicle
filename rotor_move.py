@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 import time, threading, signal, sys
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify
+
 import pigpio
 
 # ===== PIN MAP (BCM) =====
-# Left motor uses PWM0 channel (use one of the pair at a time)
+# Left motor (PWM0 channel)
 L_RPWM, L_LPWM = 12, 18
-# Right motor uses PWM1 channel (use one of the pair at a time)
+# Right motor (PWM1 channel)
 R_RPWM, R_LPWM = 13, 19
 
-PWM_FREQ   = 8000     # try 2k/8k/20k to taste
-DEADTIME_S = 0.06     # applied only when the direction for a motor flips
+PWM_FREQ   = 8000     # try 2k/8k/20k if you want
+DEADTIME_S = 0.06     # brief deadtime when flipping direction
 
-app = Flask(__name__)
+# Serve files from ./static (so / -> static/index.html automatically)
+app = Flask(__name__, static_folder="static", static_url_path="")
+
 pi = pigpio.pi()
 if not pi.connected:
-    print("ERROR: pigpio daemon not running. sudo systemctl start pigpiod", file=sys.stderr)
+    print("ERROR: pigpio daemon not running. Do: sudo systemctl start pigpiod", file=sys.stderr)
     sys.exit(1)
 
 for p in (L_RPWM, L_LPWM, R_RPWM, R_LPWM):
@@ -33,8 +36,7 @@ def stop_all():
     _stop_pair(L_RPWM, L_LPWM)
     _stop_pair(R_RPWM, R_LPWM)
 
-# Track last commanded sign per motor to insert deadtime only when flipping
-last_sign = {"L": 0, "R": 0}
+last_sign = {"L": 0, "R": 0}  # for deadtime only when direction flips
 
 def set_motor(side: str, dc: float):
     """dc in [-100..100]; + = forward, - = reverse. Only one pin active per side."""
@@ -59,11 +61,7 @@ def set_motor(side: str, dc: float):
         last_sign["R"] = sign
 
 def drive(v_pct: float, yaw_pct: float):
-    """
-    v_pct: -100..100  (negative = reverse)
-    yaw_pct: -100..100  (positive = turn LEFT, negative = RIGHT)
-      Mix: Left = v - yaw; Right = v + yaw (then saturated)
-    """
+    """v_pct: -100..100 (neg=reverse), yaw_pct: -100..100 (pos=left, neg=right)."""
     L = v_pct - yaw_pct
     R = v_pct + yaw_pct
     m = max(1.0, max(abs(L), abs(R)) / 100.0)
@@ -72,13 +70,13 @@ def drive(v_pct: float, yaw_pct: float):
     set_motor("L", L)
     set_motor("R", R)
 
-# --------- State & control loop (keeps applying latest command) ----------
+# --------- State & control loop (applies latest command at ~30Hz) ----------
 state = {"v": 0.0, "yaw": 0.0, "estop": False}
 lock = threading.Lock()
 running = True
 
 def control_loop():
-    period = 1.0 / 30.0  # ~30 Hz
+    period = 1.0 / 30.0
     while running:
         with lock:
             if state["estop"]:
@@ -93,86 +91,22 @@ def control_loop():
 threading.Thread(target=control_loop, daemon=True).start()
 
 # --------- API ---------
-@app.route("/")
-def index():
-    # Click-to-run frontend
-    return Response(f"""
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8"/>
-<title>Boat Drive</title>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<style>
-  body {{ font-family: system-ui, sans-serif; display:flex; flex-direction:column; gap:12px; max-width:420px; margin:20px auto; }}
-  .row {{ display:flex; gap:12px; }}
-  button {{ flex:1; padding:18px; font-size:18px; border-radius:12px; border:1px solid #ccc; }}
-  .big {{ background:#d00; color:#fff; font-weight:700; }}
-  .active {{ outline: 3px solid #09f; }}
-</style>
-</head>
-<body>
-  <h2>Boat Drive (Click-to-Run)</h2>
-  <div class="row">
-    <button id="forward">↑</button>
-  </div>
-  <div class="row">
-    <button id="left">←</button>
-    <button id="stop">■</button>
-    <button id="right">→</button>
-  </div>
-  <div class="row">
-    <button id="reverse">↓</button>
-  </div>
-  <div class="row">
-    <button id="estop" class="big">EMERGENCY STOP</button>
-    <button id="reset">Reset E-Stop</button>
-  </div>
-  <label>Speed % <input id="speed" type="number" min="0" max="100" value="50" style="width:80px"></label>
-  <label>Yaw % <input id="yaw" type="number" min="0" max="100" value="60" style="width:80px"></label>
 
-<script>
-function num(id){{return Math.max(0,Math.min(100,parseFloat(document.getElementById(id).value)||0));}}
-const btns = {{
-  forward: document.getElementById('forward'),
-  reverse: document.getElementById('reverse'),
-  left:    document.getElementById('left'),
-  right:   document.getElementById('right'),
-  stop:    document.getElementById('stop'),
-  estop:   document.getElementById('estop'),
-  reset:   document.getElementById('reset')
-}};
-function setActive(which){{
-  ['forward','reverse','left','right'].forEach(k=>btns[k].classList.toggle('active', k===which));
-}}
-btns.forward.onclick = ()=>{{ fetch('/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-  body:JSON.stringify({{mode:'forward',speed:num('speed')}})}}); setActive('forward'); }};
-btns.reverse.onclick = ()=>{{ fetch('/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-  body:JSON.stringify({{mode:'reverse',speed:num('speed')}})}}); setActive('reverse'); }};
-btns.left.onclick    = ()=>{{ fetch('/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-  body:JSON.stringify({{mode:'left',yaw:num('yaw')}})}}); setActive('left'); }};
-btns.right.onclick   = ()=>{{ fetch('/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-  body:JSON.stringify({{mode:'right',yaw:num('yaw')}})}}); setActive('right'); }};
-btns.stop.onclick    = ()=>{{ fetch('/stop',{{method:'POST'}}); setActive(null); }};
-btns.estop.onclick   = ()=>{{ fetch('/estop',{{method:'POST'}}); setActive(null); }};
-btns.reset.onclick   = ()=>{{ fetch('/reset',{{method:'POST'}}); setActive(null); }};
-</script>
-</body>
-</html>
-""", mimetype="text/html")
+# Static index at '/' (served automatically from ./static)
 
-@app.route("/command", methods=["POST"])
+@app.post("/command")
 def command():
     """
     Body:
       mode: 'forward'|'reverse'|'left'|'right'|'custom'
-      speed: 0..100  (forward/reverse)
-      yaw:   0..100  (left/right)
-      custom: v and yaw if mode=='custom' (each -100..100)
+      speed: 0..100  (for forward/reverse)
+      yaw:   0..100  (for left/right)
+      custom: v and yaw (-100..100) if mode=='custom'
     """
     data = request.get_json(force=True, silent=True) or {}
     mode = (data.get("mode") or "").lower()
     v, yaw = 0.0, 0.0
+
     if mode == "forward":
         v = max(0.0, min(100.0, float(data.get("speed") or 0.0)))
     elif mode == "reverse":
@@ -182,8 +116,10 @@ def command():
     elif mode == "right":
         yaw = -max(0.0, min(100.0, float(data.get("yaw") or 0.0)))
     elif mode == "custom":
-        v = float(data.get("v") or 0.0); yaw = float(data.get("yaw") or 0.0)
-        v = max(-100.0, min(100.0, v));  yaw = max(-100.0, min(100.0, yaw))
+        v   = float(data.get("v") or 0.0)
+        yaw = float(data.get("yaw") or 0.0)
+        v   = max(-100.0, min(100.0, v))
+        yaw = max(-100.0, min(100.0, yaw))
     else:
         return jsonify(ok=False, error="bad mode"), 400
 
@@ -193,17 +129,46 @@ def command():
         state["v"], state["yaw"] = v, yaw
     return jsonify(ok=True, v=v, yaw=yaw)
 
-@app.route("/stop", methods=["POST"])
+@app.post("/stop")
 def stop_cmd():
     with lock:
         state["v"], state["yaw"] = 0.0, 0.0
     stop_all()
     return jsonify(ok=True)
 
-@app.route("/estop", methods=["POST"])
+@app.post("/estop")
 def estop_cmd():
     with lock:
         state["estop"] = True
         state["v"], state["yaw"] = 0.0, 0.0
     stop_all()
     return jsonify(ok=True)
+
+@app.post("/reset")
+def reset_cmd():
+    with lock:
+        state["estop"] = False
+        state["v"], state["yaw"] = 0.0, 0.0
+    stop_all()
+    return jsonify(ok=True)
+
+@app.get("/status")
+def status():
+    with lock:
+        return jsonify(dict(state))
+
+def cleanup(*_):
+    global running
+    running = False
+    try:
+        stop_all()
+    finally:
+        pi.stop()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, cleanup)
+signal.signal(signal.SIGTERM, cleanup)
+
+if __name__ == "__main__":
+    # Serve static/index.html at http://<pi-ip>:5000/
+    app.run(host="0.0.0.0", port=5000)

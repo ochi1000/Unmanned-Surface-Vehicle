@@ -1,71 +1,69 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Boat Controls</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f4f4f4;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-        }
-        .controls {
-            display: grid;
-            grid-template-columns: 100px 100px 100px;
-            grid-template-rows: 100px 100px 100px;
-            gap: 20px;
-        }
-        .control-btn {
-            background: #007bff;
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.2em;
-            cursor: pointer;
-            transition: background 0.2s;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-            font-weight: bold;
-        }
-        .control-btn:hover {
-            background: #0056b3;
-        }
-    </style>
+  <meta charset="utf-8"/>
+  <title>Boat Drive (Click-to-Run)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body { font-family: system-ui, sans-serif; display:flex; flex-direction:column; gap:12px; max-width:420px; margin:20px auto; }
+    .row { display:flex; gap:12px; }
+    button { flex:1; padding:18px; font-size:18px; border-radius:12px; border:1px solid #ccc; cursor:pointer; }
+    .big { background:#d00; color:#fff; font-weight:700; }
+    .active { outline: 3px solid #09f; }
+    label { display:flex; align-items:center; gap:8px; }
+    input[type=number]{ width:80px; }
+  </style>
 </head>
 <body>
-    <h2>Unmanned Surface Vehicle Controls</h2>
-    <div class="controls">
-        <div></div>
-        <button class="control-btn" onclick="sendCommand('forward')" title="Forward">&#8593;</button>
-        <div></div>
-        <button class="control-btn" onclick="sendCommand('left')" title="Left">&#8592;</button>
-        <div></div>
-        <button class="control-btn" onclick="sendCommand('right')" title="Right">&#8594;</button>
-        <div></div>
-        <button class="control-btn" onclick="sendCommand('reverse')" title="Reverse">&#8595;</button>
-        <div></div>
-    </div>
-    <script>
-        function sendCommand(direction) {
-            fetch('http://your-usv-control-endpoint/api/control', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ command: direction })
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Optionally handle response
-                console.log('Success:', data);
-            })
-            .catch((error) => {
-                console.error('Error:', error);
-            });
-        }
-    </script>
+  <h2>Boat Drive (Click-to-Run)</h2>
+
+  <div class="row">
+    <button id="forward">↑ Forward</button>
+  </div>
+  <div class="row">
+    <button id="left">← Left</button>
+    <button id="stop">■ Stop</button>
+    <button id="right">Right →</button>
+  </div>
+  <div class="row">
+    <button id="reverse">↓ Reverse</button>
+  </div>
+  <div class="row">
+    <button id="estop" class="big">EMERGENCY STOP</button>
+    <button id="reset">Reset E-Stop</button>
+  </div>
+
+  <label>Speed % <input id="speed" type="number" min="0" max="100" value="50"></label>
+  <label>Yaw % <input id="yaw" type="number" min="0" max="100" value="60"></label>
+
+  <script>
+    function num(id){ return Math.max(0, Math.min(100, parseFloat(document.getElementById(id).value)||0)); }
+    const btns = {
+      forward: document.getElementById('forward'),
+      reverse: document.getElementById('reverse'),
+      left:    document.getElementById('left'),
+      right:   document.getElementById('right'),
+      stop:    document.getElementById('stop'),
+      estop:   document.getElementById('estop'),
+      reset:   document.getElementById('reset')
+    };
+    function setActive(which){
+      ['forward','reverse','left','right'].forEach(k=>btns[k].classList.toggle('active', k===which));
+    }
+    async function post(path, body){
+      try{
+        const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body: body?JSON.stringify(body):null});
+        return await r.json();
+      }catch(e){ console.warn(e); return {ok:false, error:'fetch failed'}; }
+    }
+
+    btns.forward.onclick = ()=>{ post('/command', {mode:'forward', speed:num('speed')}); setActive('forward'); };
+    btns.reverse.onclick = ()=>{ post('/command', {mode:'reverse', speed:num('speed')}); setActive('reverse'); };
+    btns.left.onclick    = ()=>{ post('/command', {mode:'left',    yaw:num('yaw')  }); setActive('left'); };
+    btns.right.onclick   = ()=>{ post('/command', {mode:'right',   yaw:num('yaw')  }); setActive('right'); };
+    btns.stop.onclick    = ()=>{ post('/stop'); setActive(null); };
+    btns.estop.onclick   = ()=>{ post('/estop'); setActive(null); };
+    btns.reset.onclick   = ()=>{ post('/reset'); setActive(null); };
+  </script>
 </body>
 </html>
