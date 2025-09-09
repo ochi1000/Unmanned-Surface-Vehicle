@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Boat Controls</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: 100px 100px 100px;
+            grid-template-rows: 100px 100px 100px;
+            gap: 20px;
+        }
+        .control-btn {
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: background 0.2s;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            font-weight: bold;
+        }
+        .control-btn:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h2>Unmanned Surface Vehicle Controls</h2>
+    <div class="controls">
+        <div></div>
+        <button class="control-btn" onclick="sendCommand('forward')" title="Forward">&#8593;</button>
+        <div></div>
+        <button class="control-btn" onclick="sendCommand('left')" title="Left">&#8592;</button>
+        <div></div>
+        <button class="control-btn" onclick="sendCommand('right')" title="Right">&#8594;</button>
+        <div></div>
+        <button class="control-btn" onclick="sendCommand('reverse')" title="Reverse">&#8595;</button>
+        <div></div>
+    </div>
+    <script>
+        function sendCommand(direction) {
+            fetch('http://your-usv-control-endpoint/api/control', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ command: direction })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Optionally handle response
+                console.log('Success:', data);
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        }
+    </script>
+</body>
+</html>
